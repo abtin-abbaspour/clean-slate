@@ -18,12 +18,12 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 class MessageDeleter:
     def __init__(self):
         self.deletion_in_progress = False
-        self.cancel_requested = False  # <-- New cancellation flag
+        self.cancel_requested = False  # Cancellation flag
         self.last_message_id = None  # Store ID in memory instead of file
 
     async def delete_messages(self, channel, user, start_from_id=None):
         self.deletion_in_progress = True
-        self.cancel_requested = False  # <-- Reset cancellation flag at start
+        self.cancel_requested = False  # Reset cancellation flag at start
         deleted_messages = 0
         processed_messages = 0
         start_time = datetime.now()
@@ -33,7 +33,7 @@ class MessageDeleter:
             search_start_logged = False
 
             while True:
-                # Check for cancellation before starting a new batch
+                # Check for cancellation before processing a new batch
                 if self.cancel_requested:
                     print("Deletion process cancelled before processing next batch.")
                     break
@@ -49,7 +49,7 @@ class MessageDeleter:
                     last_message = message
                     processed_messages += 1
                     if processed_messages % 1000 == 0:
-                        self.last_message_id = message.id  # Store in memory instead of file
+                        self.last_message_id = message.id
                         print(f"Viewed message ID: {message.id}, Author: {message.author}, Content: {message.content}")
 
                     if message.author == user:
@@ -76,11 +76,11 @@ class MessageDeleter:
                         except Exception as e:
                             print(f'Unexpected exception: {e}')
 
-                # If cancellation was requested during the inner loop, break out
+                # If cancellation was requested during the inner loop, exit immediately
                 if self.cancel_requested:
                     break
 
-                # If no messages were retrieved in this batch, exit the loop
+                # If no messages were retrieved, exit the loop
                 if last_message is None:
                     break
 
@@ -93,7 +93,8 @@ class MessageDeleter:
             print(f'Deletion process started at {start_time} and ended at {end_time}.')
             print(f'Deleted {deleted_messages} messages from {user.name} in {duration:.2f} seconds.')
 
-deleter = MessageDeleter()
+# Dictionary to keep track of deletion processes per channel
+channel_deleters = {}
 
 @bot.event
 async def on_ready():
@@ -104,9 +105,14 @@ async def on_ready():
 async def d(ctx, user: discord.User, message_id: int = None):
     """Delete all messages of a specified user in the current channel.
     Optionally specify a message ID to start deletion from."""
-    if deleter.deletion_in_progress:
-        print("A deletion process is already in progress. Please wait until it finishes.")
+    # Use a per-channel deleter instance to allow simultaneous deletions across channels/servers
+    deleter = channel_deleters.get(ctx.channel.id)
+    if deleter and deleter.deletion_in_progress:
+        print("A deletion process is already in progress in this channel. Please wait until it finishes.")
         return
+
+    deleter = MessageDeleter()
+    channel_deleters[ctx.channel.id] = deleter
 
     try:
         await ctx.message.delete()  # Delete the command message
@@ -115,31 +121,27 @@ async def d(ctx, user: discord.User, message_id: int = None):
     except discord.errors.NotFound:
         print(f"NotFound: Command message already deleted in {ctx.channel.name}")
     except discord.errors.DiscordException as e:
-        print(f'DiscordException: {e}')
+        print(f"DiscordException: {e}")
     except Exception as e:
-        print(f'Unexpected exception: {e}')
+        print(f"Unexpected exception: {e}")
 
     await deleter.delete_messages(ctx.channel, user, message_id)
     print(f"Deleted messages from {user.name}.")
 
-# New command to cancel the deletion process
+    # Remove the deleter once the deletion process is complete
+    if ctx.channel.id in channel_deleters:
+        del channel_deleters[ctx.channel.id]
+
 @bot.command()
 @commands.has_permissions(manage_messages=True)
 async def cancel(ctx):
-    """Cancel the current deletion process."""
-    try:
-        await ctx.message.delete()  # Delete the cancel command message
-    except discord.errors.Forbidden:
-        print(f"Forbidden: Cannot delete the cancel command message in {ctx.channel.name}")
-    except Exception as e:
-        print(f'Unexpected exception when deleting cancel command: {e}')
-
-    if not deleter.deletion_in_progress:
-        print("No deletion process is currently in progress.")
+    """Cancel the current deletion process in this channel."""
+    deleter = channel_deleters.get(ctx.channel.id)
+    if not deleter or not deleter.deletion_in_progress:
+        await ctx.send("No deletion process is currently in progress in this channel.")
         return
-    
     deleter.cancel_requested = True
-    print("Cancellation requested for the deletion process.")
+    await ctx.send("Cancellation requested for the deletion process in this channel.")
 
 # Error handling for command permissions
 @d.error
