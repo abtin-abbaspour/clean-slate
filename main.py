@@ -18,10 +18,18 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 class MessageDeleter:
     def __init__(self):
         self.deletion_in_progress = False
-        self.last_message_id = None  # Store ID in memory instead of file
+        self.last_message_id = None
+        self.cancel_requested = False
+
+    async def cancel_deletion(self):
+        if self.deletion_in_progress:
+            self.cancel_requested = True
+            return True
+        return False
 
     async def delete_messages(self, channel, user, start_from_id=None):
         self.deletion_in_progress = True
+        self.cancel_requested = False
         deleted_messages = 0
         processed_messages = 0
         start_time = datetime.now()
@@ -31,44 +39,48 @@ class MessageDeleter:
             search_start_logged = False
 
             while True:
-                async for message in channel.history(limit=1000, before=before):
-                    if not search_start_logged:
-                        print(f"Started searching for messages before message ID: {before.id if before else 'the most recent message'}")
-                        search_start_logged = True
+                if self.cancel_requested:
+                    print("Deletion process cancelled by user.")
+                    break
 
-                    processed_messages += 1
-                    if processed_messages % 1000 == 0:
-                        self.last_message_id = message.id  # Store in memory instead of file
-                        print(f"Viewed message ID: {message.id}, Author: {message.author}, Content: {message.content}")
+                if not search_start_logged:
+                    print(f"Started searching for messages before message ID: {before.id if before else 'the most recent message'}")
+                    search_start_logged = True
 
-                    if message.author == user:
-                        try:
-                            await message.delete()
-                            deleted_messages += 1
-                            print(f"Deleted message ID: {message.id}, Author: {message.author}, Content: {message.content}")
-                            await asyncio.sleep(1)  # Sleep to handle rate limits
-                        except discord.errors.HTTPException as e:
-                            if e.status == 429:
-                                retry_after = e.response.headers.get('Retry-After')
-                                if retry_after:
-                                    retry_after = float(retry_after)
-                                    print(f'Rate limited. Retrying after {retry_after} seconds.')
-                                    await asyncio.sleep(retry_after)
-                            else:
-                                print(f'HTTPException: {e}')
-                        except discord.errors.Forbidden:
-                            print(f"Forbidden: Cannot delete message in {channel.name}")
-                        except discord.errors.NotFound:
-                            print(f"NotFound: Message already deleted in {channel.name}")
-                        except discord.errors.DiscordException as e:
-                            print(f'DiscordException: {e}')
-                        except Exception as e:
-                            print(f'Unexpected exception: {e}')
+                processed_messages += 1
+                if processed_messages % 1000 == 0:
+                    self.last_message_id = message.id
+                    print(f"Viewed message ID: {message.id}, Author: {message.author}, Content: {message.content}")
+
+                if message.author == user:
+                    try:
+                        await message.delete()
+                        deleted_messages += 1
+                        print(f"Deleted message ID: {message.id}, Author: {message.author}, Content: {message.content}")
+                        await asyncio.sleep(1)  # Sleep to handle rate limits
+                    except discord.errors.HTTPException as e:
+                        if e.status == 429:
+                            retry_after = e.response.headers.get('Retry-After')
+                            if retry_after:
+                                retry_after = float(retry_after)
+                                print(f'Rate limited. Retrying after {retry_after} seconds.')
+                                await asyncio.sleep(retry_after)
+                        else:
+                            print(f'HTTPException: {e}')
+                    except discord.errors.Forbidden:
+                        print(f"Forbidden: Cannot delete message in {channel.name}")
+                    except discord.errors.NotFound:
+                        print(f"NotFound: Message already deleted in {channel.name}")
+                    except discord.errors.DiscordException as e:
+                        print(f'DiscordException: {e}')
+                    except Exception as e:
+                        print(f'Unexpected exception: {e}')
 
                 before = message  # Continue from the last message processed
 
         finally:
             self.deletion_in_progress = False
+            self.cancel_requested = False
             end_time = datetime.now()
             duration = (end_time - start_time).total_seconds()
             print(f'Deletion process started at {start_time} and ended at {end_time}.')
@@ -110,6 +122,14 @@ async def d_error(ctx, error):
         print("You don't have permission to delete messages.")
     else:
         print(f"An error occurred: {error}")
+
+@bot.command()
+async def cancel(ctx):
+    """Cancel the ongoing message deletion process."""
+    if await deleter.cancel_deletion():
+        print("Cancellation requested. The deletion process will stop soon.")
+    else:
+        print("No deletion process is currently running.")
 
 # Run the bot
 bot.run(TOKEN)
