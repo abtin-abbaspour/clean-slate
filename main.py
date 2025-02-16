@@ -13,7 +13,7 @@ intents.messages = True
 intents.message_content = True
 
 # Prefix for bot commands
-bot = commands.Bot(command_prefix='!', intents=intents, disable_audio=True)
+bot = commands.Bot(command_prefix='!', intents=intents)
 
 class MessageDeleter:
     def __init__(self):
