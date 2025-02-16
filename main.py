@@ -127,11 +127,19 @@ async def d(ctx, user: discord.User, message_id: int = None):
 @commands.has_permissions(manage_messages=True)
 async def cancel(ctx):
     """Cancel the current deletion process."""
+    try:
+        await ctx.message.delete()  # Delete the cancel command message
+    except discord.errors.Forbidden:
+        print(f"Forbidden: Cannot delete the cancel command message in {ctx.channel.name}")
+    except Exception as e:
+        print(f'Unexpected exception when deleting cancel command: {e}')
+
     if not deleter.deletion_in_progress:
-        await ctx.send("No deletion process is currently in progress.")
+        print("No deletion process is currently in progress.")
         return
+    
     deleter.cancel_requested = True
-    await ctx.send("Cancellation requested for the deletion process.")
+    print("Cancellation requested for the deletion process.")
 
 # Error handling for command permissions
 @d.error
